@@ -1,0 +1,119 @@
+import torchvision.transforms as transforms
+import torch
+from transformers import BlipProcessor, BlipForConditionalGeneration, BlipTextModel
+import pickle
+from PIL import Image
+from torch.nn.utils.rnn import pad_sequence
+import random
+import numpy as np
+from sklearn.model_selection import train_test_split
+import os
+import torch.nn.functional as F
+import time
+
+
+# Load the model from the saved directory
+text_model = BlipTextModel.from_pretrained("/scratch/cs21d001/action_recognition/blip_text_model")
+
+processor = BlipProcessor.from_pretrained("/scratch/cs21d001/action_recognition/content/blip-processor")
+blip_model = BlipForConditionalGeneration.from_pretrained("/scratch/cs21d001/action_recognition/content/blip-model")
+
+device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+with open('/scratch/cs21d001/action_recognition/vlm/ucf101_frame_list_train.pkl', 'rb') as f:
+    frame_list = pickle.load(f)
+
+
+import re
+def clean_text(text):
+    """Clean the generated text to remove unnecessary symbols and spaces."""
+    text = text.lower().strip()  # Convert to lowercase and strip spaces
+    text = re.sub(r"[^a-zA-Z0-9\s]", "", text)  # Remove special characters
+    return text if text else "unknown description"  # Handle empty captions
+
+def normalize_embeddings(embeddings):
+    """Normalize text embeddings using L2 normalization."""
+    return F.normalize(embeddings, p=2, dim=1)
+
+
+import torch
+import glob
+
+# This function is for getting the text embeddings as well as the cross-embeddings.
+def get_cross_embeddings(frame_list):
+    num_frames = len(frame_list)
+    caption_embedding=[]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    blip_model.to(device)
+    blip_model.eval()
+    caption_embedding, align_embedding = [],[]
+
+    # Resume from last checkpoint if available
+    checkpoint_files = sorted(glob.glob("/scratch/cs21d001/action_recognition/vlm/embeddings_checkpoint_*.pt"))
+    if checkpoint_files:
+        latest_checkpoint = checkpoint_files[-1]
+        caption_embedding = torch.load(latest_checkpoint)
+        start_idx = int(latest_checkpoint.split("_")[-1].split(".")[0])
+        print(f"Resuming from checkpoint: {latest_checkpoint}")
+    else:
+        start_idx = 0
+
+    for i in range(start_idx, num_frames, batch_size):
+        batch_frames = frame_list[i:min(i + batch_size, num_frames)]
+        inputs = processor(batch_frames, return_tensors="pt").to(device)
+
+      
+       
+
+        with torch.no_grad():
+            outputs = blip_model.generate(**inputs)
+
+        batch_captions = [processor.decode(o, skip_special_tokens=True) for o in outputs]
+        batch_captions = [clean_text(txt) for txt in batch_captions] 
+        
+    #  # Extract text-visual embeddings 
+       
+        inputs = processor(images=batch_frames, text=batch_captions, return_tensors="pt", padding=True, truncation=True).to(device)
+     
+        with torch.no_grad():
+            outputs = blip_model(**inputs, output_hidden_states=True)
+       
+    
+        # Extract [CLS] token embeddings
+        sentence_embedding = outputs.last_hidden_state[:, 0, :]
+        
+        batch_embeddings = [normalize_embeddings(embedding.unsqueeze(0)) for embedding in sentence_embedding]
+        align_embedding.extend(batch_embeddings)
+
+        # get the text embeddings.
+        text_inputs = processor(text=batch_captions, return_tensors="pt", padding=True, truncation=True).to(device)
+       
+        with torch.no_grad():
+            outputs = text_model(**text_inputs)
+        sentence_embedding = outputs.last_hidden_state[:, 0, :]
+        batch_embeddings = [normalize_embeddings(embedding.unsqueeze(0)) for embedding in sentence_embedding]
+        caption_embedding.extend(batch_embeddings)
+
+
+       # Save checkpoints every 100 frames
+        if (i + batch_size) % 1000== 0:
+            print(f"batch:{(i + batch_size) % 1000}")
+            torch.save(caption_embedding, f"/scratch/cs21d001/action_recognition/vlm/embeddings_checkpoint_{i + batch_size}.pt")
+            print(f"Checkpoint saved at {i + batch_size}")
+
+        # Free memory
+        del outputs, inputs, sentence_embedding, batch_embeddings
+        torch.cuda.empty_cache()
+       
+       
+        
+
+    # Save final embeddings
+    torch.save(caption_embedding, "/scratch/cs21d001/action_recognition/vlm/final_embeddings_train_ucf101.pt")
+    torch.save(align_embedding, "/scratch/cs21d001/action_recognition/vlm/align_final_embeddings_train_ucf101.pt")
+    print("Final embeddings saved!")
+
+
+batch_size=128
+get_text_embeddings(frame_list)
+
