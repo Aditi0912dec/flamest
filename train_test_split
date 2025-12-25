@@ -1,0 +1,45 @@
+import os
+import shutil
+import random
+
+def split_dataset(dataset_path, train_ratio=0.8):
+    actions = os.listdir(dataset_path)
+    train_dir = os.path.join('/scratch/cs21d001/action_recognition', 'ucf101_train_dataset')
+    test_dir = os.path.join('/scratch/cs21d001/action_recognition', 'ucf101_test_dataset')
+
+    # Create train and test directories
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(test_dir, exist_ok=True)
+
+    for action in actions:
+        action_path = os.path.join(dataset_path, action)
+        if os.path.isdir(action_path):  # Check if it's a directory
+            videos = os.listdir(action_path)
+            random.shuffle(videos)
+
+            train_size = int(len(videos) * train_ratio)
+            train_videos = videos[:train_size]
+            test_videos = videos[train_size:]
+
+            # Create action directories in train and test folders
+            train_action_dir = os.path.join(train_dir, action)
+            test_action_dir = os.path.join(test_dir, action)
+            os.makedirs(train_action_dir, exist_ok=True)
+            os.makedirs(test_action_dir, exist_ok=True)
+
+            # Copy the video folders to the respective directories
+            for video in train_videos:
+                src = os.path.join(action_path, video)
+                dst = os.path.join(train_action_dir, video)
+                shutil.copytree(src, dst)
+
+            for video in test_videos:
+                src = os.path.join(action_path, video)
+                dst = os.path.join(test_action_dir, video)
+                shutil.copytree(src, dst)
+
+    print("Dataset successfully split into train and test folders.")
+
+# Example usage:
+dataset_path = '/scratch/cs21d001/action_recognition/keyframes5'  # Replace with your dataset path
+split_dataset(dataset_path)
