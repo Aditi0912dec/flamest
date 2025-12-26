@@ -17,6 +17,9 @@ Experiments on **UCF101** and **HMDB51** demonstrate robustness and performance 
 - **+2.71%** on **HMDB51**
 
 compared to the baseline.
+<p align="center">
+  <img src="assets/flamest_pipeline.png" alt="FLAMeST Framework" width="800"/>
+</p>
 
 ---
 
