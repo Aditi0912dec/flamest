@@ -18,7 +18,7 @@ Experiments on **UCF101** and **HMDB51** demonstrate robustness and performance 
 
 compared to the baseline.
 <p align="center">
-  <img src="assets/flamest_pipeline.png" alt="FLAMeST Framework" width="800"/>
+  <img src="FLAMeST.jpg" alt="FLAMeST Framework" width="800"/>
 </p>
 
 ---
