@@ -48,21 +48,25 @@ def normalize_embeddings(embeddings):
     return F.normalize(embeddings, p=2, dim=1)
 
 
-def get_frames(action_classes,dataset_dir):
-    count=0
-    video_paths,labels=[],[]
-    for class_index,action_class in enumerate(action_classes):
-            action_class_path = os.path.join(dataset_dir , action_class)
-            counter = 0
-            if os.path.isdir(action_class_path):  # Check if it's a directory
-                # Get video files from the action class folder
-                    video_files = [os.path.join(action_class_path, f) for f in os.listdir(action_class_path) if f.endswith('.avi')]
-                    for video_file in video_files:
-                            video_paths.append(video_file)
-                            labels.append(class_index)
-                        
-            print(f"action class is {action_class} and the sample count is {len(video_files)}")
-    return video_paths,labels
+def get_frames(action_classes, dataset_dir):
+    video_paths, labels = [], []
+    for class_index, action_class in enumerate(action_classes):
+        action_class_path = os.path.join(dataset_dir, action_class)
+        if not os.path.isdir(action_class_path):
+            continue
+
+        # each subfolder is a "video"
+        video_folders = [os.path.join(action_class_path, d)
+                         for d in os.listdir(action_class_path)
+                         if os.path.isdir(os.path.join(action_class_path, d))]
+
+        for vf in video_folders:
+            video_paths.append(vf)
+            labels.append(class_index)
+
+        print(f"class={action_class} samples={len(video_folders)}")
+    return video_paths, labels
+
 
 
 ###########
@@ -156,23 +160,42 @@ def get_img_embeddings(video_paths,f_list):
 
    
 
-f_list_train=[]
-video_path_train,gt_train=get_frames(CLASSES,DATASET_DIR_TRAIN)
-start=time.time()
-img_emb_train=get_img_embeddings(video_path_train,f_list_train)
-print(f"len f list test:{len(f_list_train)}")
-print(f"execution time : {time.time()-start}")
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Extract SlowR50 embeddings from keyframe folders (per video folder).")
+    parser.add_argument("--dataset_dir", required=True, help="Path like ucf101_train_dataset (class/video/frame.jpg)")
+    parser.add_argument("--checkpoint", required=True, help="Path to slow_r50_weights.pth")
+    parser.add_argument("--out_dir", required=True, help="Output dir to save .npy/.pkl files")
+    parser.add_argument("--device", default="cuda", choices=["cuda","cpu"], help="cuda or cpu")
+    args = parser.parse_args()
 
-# Save the embeddings to a file
+    DATASET_DIR_TRAIN = args.dataset_dir
+    CLASSES = [d for d in os.listdir(DATASET_DIR_TRAIN) if os.path.isdir(os.path.join(DATASET_DIR_TRAIN, d))]
 
-np.save("/scratch/cs21d001/action_recognition/vlm/ucf101_labels_train.npy",gt_train)
+    device = args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu"
 
-with open('/scratch/cs21d001/action_recognition/vlm/ucf101_frame_list_train.pkl', 'wb') as f:
-   pickle.dump(f_list_train, f)
+    r3d_model = slow_r50(pretrained=False)
+    r3d_model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    r3d_model.to(device).eval()
 
-with open('/scratch/cs21d001/action_recognition/vlm/ucf101_test_img_embeddings.pkl', 'wb') as f:
-   pickle.dump(img_emb_train, f)
-print("IMAGE EMBEDDINGS EXTRACTED")
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    f_list_train=[]
+    video_path_train, gt_train = get_frames(CLASSES, DATASET_DIR_TRAIN)  # (see NOTE below)
+    start=time.time()
+    img_emb_train = get_img_embeddings(video_path_train, f_list_train)
+    print(f"len f list train: {len(f_list_train)}")
+    print(f"execution time : {time.time()-start}")
+
+    np.save(os.path.join(args.out_dir, "ucf101_labels_train.npy"), np.array(gt_train))
+
+    with open(os.path.join(args.out_dir, "ucf101_frame_list_train.pkl"), "wb") as f:
+        pickle.dump(f_list_train, f)
+
+    with open(os.path.join(args.out_dir, "ucf101_img_embeddings_train.pkl"), "wb") as f:
+        pickle.dump(img_emb_train, f)
+
+    print("IMAGE EMBEDDINGS EXTRACTED")
 
 
 
