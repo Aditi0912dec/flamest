@@ -1,0 +1,30 @@
+# Core
+numpy
+scipy
+tqdm
+packaging
+
+# PyTorch
+torch
+torchvision
+torchaudio
+
+# Video models
+pytorchvideo
+
+# HuggingFace / VLMs
+transformers
+accelerate
+sentencepiece
+einops
+
+# Image & video processing
+opencv-python
+Pillow
+matplotlib
+
+# Machine learning utilities
+scikit-learn
+
+# Serialization / utils
+pickle-mixin
