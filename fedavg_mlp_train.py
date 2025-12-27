@@ -298,6 +298,79 @@ class Server:
             #client.local_embedder.load_state_dict(self.global_embedder.state_dict())
 
 # get client data 
+
+
+print("DONE")
+
+def main():
+    set_seed(42)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # ====== IMPORTANT: keep dataset consistent ======
+    # If you are using UCF101 embeddings, load UCF101 labels.
+    # If you are using HMDB embeddings, load HMDB labels.
+    # Change these 6 paths consistently.
+
+    IMG_EMB_TRAIN_PKL   = "/scratch/cs21d001/action_recognition/vlm/ucf101_train_img_embeddings.pkl"
+    IMG_EMB_TEST_PKL    = "/scratch/cs21d001/action_recognition/vlm/ucf101_test_img_embeddings.pkl"
+    ALIGN_EMB_TRAIN_PT  = "/scratch/cs21d001/action_recognition/vlm/align_final_embeddings_train_ucf101.pt"
+    ALIGN_EMB_TEST_PT   = "/scratch/cs21d001/action_recognition/vlm/align_final_embeddings_test_ucf101.pt"
+    LABELS_TRAIN_NPY    = "/scratch/cs21d001/action_recognition/vlm/ucf101_labels_train.npy"
+    LABELS_TEST_NPY     = "/scratch/cs21d001/action_recognition/vlm/ucf101_labels_test.npy"
+
+    import pickle
+    with open(IMG_EMB_TRAIN_PKL, "rb") as f:
+        img_train_list = pickle.load(f)
+    with open(IMG_EMB_TEST_PKL, "rb") as f:
+        img_test_list = pickle.load(f)
+
+    align_train_list = torch.load(ALIGN_EMB_TRAIN_PT, map_location="cpu")
+    align_test_list  = torch.load(ALIGN_EMB_TEST_PT,  map_location="cpu")
+
+    y_train = np.load(LABELS_TRAIN_NPY)
+    y_test  = np.load(LABELS_TEST_NPY)
+
+    # Convert to tensors [N, D]
+    img_train  = to_2d_tensor_list(img_train_list).float()
+    img_test   = to_2d_tensor_list(img_test_list).float()
+    align_train = to_2d_tensor_list(align_train_list).float()
+    align_test  = to_2d_tensor_list(align_test_list).float()
+
+    # Sanity checks
+    assert img_train.shape[0] == align_train.shape[0] == len(y_train), "Train N mismatch"
+    assert img_test.shape[0] == align_test.shape[0] == len(y_test), "Test N mismatch"
+
+    # Concatenate and normalize
+    x_train = torch.cat([img_train, align_train], dim=1)
+    x_test  = torch.cat([img_test,  align_test],  dim=1)
+    x_train = l2_normalize(x_train)
+    x_test  = l2_normalize(x_test)
+
+    input_dim = x_train.shape[1]
+    num_classes = int(len(np.unique(y_train)))
+    print("input_dim:", input_dim, "num_classes:", num_classes)
+
+    y_train_t = torch.tensor(y_train, dtype=torch.long)
+    y_test_t  = torch.tensor(y_test, dtype=torch.long)
+
+    # Federated params
+    n_clients = 10
+    alpha = 0.6
+    samples_per_client = 1000
+    rounds = 5
+    local_epochs = 1
+    lr = 1e-3
+    batch_size = 128
+
+    label_to_indices = create_label_to_indices(y_train)
+    client_indices = dirichlet_client_wise(
+        n_clients=n_clients,
+        n_classes=num_classes,
+        alpha=alpha,
+        label_to_indices=label_to_indices,
+        samples_per_client=samples_per_client,
+        seed=42
+    )
 clients = []
 batch=128
 
@@ -307,7 +380,7 @@ for i in range(n):
     client_labels_data = [labels[j] for j in data_indices]  # Get corresponding labels
 
 rounds=1
-for c in [4]:
+for c in [2,4,8]:
     server = Server()
     set_clients=[]
     mean_acc=[]
@@ -316,7 +389,7 @@ for c in [4]:
     print(f"clients seleced for c ={c} are {client_select}")
     for i in client_select:
         set_clients.append(Client(i, client_data, client_labels_data,batch,num_classes))  
-    for r in range(rounds):  # Number of communication rounds
+    for r in range(1, rounds + 1):  # Number of communication rounds
           
             local_models = [client.train() for client in  set_clients]
             global_model=server.aggregate_models(local_models)
@@ -327,5 +400,3 @@ for c in [4]:
     print(f"Average accuracy achieved after round {r+1}: {np.mean(mean_acc):.2f}%")
     print(f"Maximum accuracy achieved at round {mean_acc.index(max(mean_acc))+1}: {max(mean_acc):.2f}%")
     print(f"Minimum accuracy achieved at round {mean_acc.index(min(mean_acc))+1}: {min(mean_acc):.2f}%")
-
-print("DONE")
